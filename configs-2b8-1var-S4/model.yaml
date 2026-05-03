@@ -1,0 +1,30 @@
+wavenet:
+  # WaveNet model parameters
+  input_channels:      1  # Number of input channels
+  output_channels:     1  # Number of output channels
+  residual_layers:    32  # Number of residual layers
+  residual_channels:  64  # Number of channels in residual blocks
+  skip_channels:      64  # Number of channels in skip connections
+
+  # Diffusion step embedding dimensions
+  diffusion_step_embed_dim_input:  128  # Input dimension
+  diffusion_step_embed_dim_hidden: 256  # Middle dimension
+  diffusion_step_embed_dim_output: 256  # Output dimension
+
+  # Structured State Spaces sequence model (S4) configurations
+  s4_max_sequence_length: 90  # Maximum sequence length
+  s4_state_dim: 128  # State dimension
+  s4_dropout: 0.1  # Dropout rate
+  s4_bidirectional: true  # Whether to use bidirectional layers
+  s4_use_layer_norm: true  # Whether to use layer normalization
+
+diffusion:
+  # Diffusion model parameters
+  T: 100  # Number of diffusion steps
+  beta_0: 0.0001  # Initial beta value
+  beta_T: 0.05  # Final beta value
+
+AFRK:
+# AutoFRK model parameters, for more details, please refer to https://pypi.org/project/autoFRK/
+  method: "fast"  # autoFRK method to use (e.g., "fast")
+  tps_method: "rectangular"  # autoFRK's TPS method to use (e.g., "rectangular")
