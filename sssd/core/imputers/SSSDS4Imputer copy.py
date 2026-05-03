@@ -261,13 +261,13 @@ class SSSDS4Imputer(nn.Module):
         conditional = conditional * mask
         conditional = torch.cat([conditional, mask.float()], dim=1)
 
-        # AFRK prior
-        if self.use_afrk and frk_pred is not None:
-            # 如果 AFRK 是空間先驗，通常不希望 missing 區域變成亂值
-            frk_pred = frk_pred * mask.float()
+        # # AFRK prior
+        # if self.use_afrk and frk_pred is not None:
+        #     # 如果 AFRK 是空間先驗，通常不希望 missing 區域變成亂值
+        #     conditional = frk_pred * mask.float()
 
-            # 加到條件分支
-            conditional = torch.cat([conditional, frk_pred], dim=1)
+        #     # 加到條件分支
+        #     conditional = torch.cat([conditional, frk_pred], dim=1)
 
         # Forward pass through the network
         x = noise  # Ensure x is 3D (B, C, L)

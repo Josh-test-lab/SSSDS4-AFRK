@@ -77,8 +77,8 @@ def training_loss(
     # New: Integrate AutoFRK for spatial prediction
     frk_pred = None
     if enable_frk and loc is not None:
-        temp = transformed_series.permute(1, 0, 2)
-        frk_pred = torch.zeros_like(transformed_series)
+        temp = time_series.permute(1, 0, 2)
+        frk_pred = torch.zeros_like(time_series)
         for i in range(temp.shape[0]):
             success = False
             while not success:
