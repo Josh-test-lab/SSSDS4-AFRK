@@ -1,4 +1,4 @@
 # SSSDS4-AFRK
 
-安裝請參考 [README_old](README_old.md) 。
+安裝請使用 [envs/conda/build_conda_env.sh](envs/conda/build_conda_env.sh) 。
 
