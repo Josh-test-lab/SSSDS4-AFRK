@@ -1,0 +1,22 @@
+# Inference configuration
+batch_size: 40  # Batch size for inference
+output_directory: "./results/2a9-1var-S4+AFRK/inference"  # Output directory for inference results
+ckpt_path: "./results/2a9-1var-S4+AFRK"  # Path to checkpoint for inference
+trials: 1 # Replications
+
+# Additional training settings
+only_generate_missing: true  # Generate missing values only
+use_model: 2  # Model to use for training
+masking: "forecast"  # Masking strategy for missing values  # inference mode need to fix in the code, or using other masking strategy will be failed
+missing_k: 10  # Number of missing values
+
+# Data paths
+data:
+  test_path: "./datasets/2a9-1var/data_train_known_real.npy"  # Path to test data
+
+# autoFRK config
+enable_spatial_inference: true  # Enable spatial prediction step
+enable_spatial_normalization: true  # Enable spatial normalization before and after autoFRK
+known_location_path: "./datasets/2a9-1var/stations_known_locations.npy"  # Path to known locations
+unknown_location_path: "./datasets/2a9-1var/stations_unknown_locations.npy"  # Path to unknown locations
+

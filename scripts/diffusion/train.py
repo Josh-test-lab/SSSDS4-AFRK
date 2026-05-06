@@ -2,9 +2,11 @@ import argparse
 import os
 from typing import Optional, Union
 
+import numpy as np
 import torch
 import yaml
 import time
+from autoFRK import MRTS
 
 from sssd.core.model_specs import MODEL_PATH_FORMAT, setup_model
 from sssd.data.utils import get_dataloader
@@ -59,17 +61,28 @@ def run_job(
     device: Optional[Union[torch.device, str]],
 ) -> None:
     output_directory = setup_output_directory(model_config, training_config)
-    # dataloader = get_dataloader(
-    #     training_config["data"]["train_path"],
-    #     batch_size=training_config.get("batch_size"),
-    #     device=device,
-    # )
 
     diffusion_hyperparams = calc_diffusion_hyperparams(
         **model_config["diffusion"], device=device
     )
-    net = setup_model(training_config["use_model"], model_config, device)
 
+    location_path=os.path.abspath(training_config["location_path"])
+    loc = torch.from_numpy(np.load(location_path)).to(dtype=torch.float32)
+    use_mrts=model_config['MRTS'].get("use_mrts", False)
+    mrts_dim = model_config['MRTS'].get("mrts_dim", -1)
+    N = torch.tensor(loc.shape[0], dtype=torch.float32, device=device)
+    klim = torch.minimum(N, torch.round(10 * torch.sqrt(N))).to(torch.int64)
+    if use_mrts:
+        assert mrts_dim == -1 or mrts_dim > 0, "MRTS dimension must be -1 (for default) or a positive integer."
+        if mrts_dim == -1:
+            pass  # klim is already set to the default value based on N
+        else:
+            klim = torch.tensor(mrts_dim, dtype=torch.float32, device=device)
+        LOGGER.info(f"Using MRTS with {klim} dimensions for spatial training.")
+    net = setup_model(training_config["use_model"], model_config, use_mrts=use_mrts, mrts_dim=klim, device=device)
+
+    if use_mrts:
+        LOGGER.info(f"Using MRTS with {klim} dimensions for spatial training.")
     LOGGER.info(display_current_time())
     trainer = DiffusionTrainer(
         data_path=training_config["data"]["train_path"],  # New
@@ -86,17 +99,34 @@ def run_job(
         masking=training_config.get("masking"),
         missing_k=training_config.get("missing_k"),
         batch_size=training_config.get("batch_size"),
-        enable_spatial_training=training_config.get("enable_spatial_training"),  # New
-        location_path=os.path.abspath(training_config["location_path"]),  # New
-        AFRK_method=model_config["AFRK"].get("method"),  # New
-        AFRK_tps_method=model_config["AFRK"].get("tps_method"),  # New
+        use_mrts=use_mrts,  # New
+        mrts_dim=klim,  # New
+        location_path=location_path,  # New
         logger=LOGGER,
     )
     trainer.train()
 
     LOGGER.info(display_current_time())
 
+def set_seed(seed: int = 42):
+    import random
+    import numpy as np
+    import torch
 
+    # Python random
+    random.seed(seed)
+
+    # NumPy
+    np.random.seed(seed)
+
+    # PyTorch (CPU)
+    torch.manual_seed(seed)
+
+    # PyTorch (GPU)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        
 if __name__ == "__main__":
     args = fetch_args()
 
@@ -113,6 +143,12 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     start_time = time.perf_counter()
+
+    
+    seed = model_config.get("seed", -1)  # -1 for random seed
+    if seed != -1:
+        set_seed(seed)
+        LOGGER.info(f"Random seed set to {seed} for reproducibility.")
 
     run_job(model_config, training_config, device)
 

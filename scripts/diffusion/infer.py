@@ -2,8 +2,10 @@ import argparse
 from typing import Optional, Union
 
 import os  # New
+import numpy as np
 import torch
 import torch.nn as nn
+from autoFRK import MRTS
 import yaml
 
 from sssd.core.model_specs import MODEL_PATH_FORMAT, setup_model
@@ -48,11 +50,6 @@ def run_job(
 ) -> None:
     trials = inference_config.get("trials")
     batch_size = inference_config["batch_size"]
-    # dataloader = get_dataloader(
-    #     inference_config["data"]["test_path"],
-    #     batch_size,
-    #     device=device,
-    # )
 
     local_path = MODEL_PATH_FORMAT.format(
         T=model_config["diffusion"]["T"],
@@ -64,7 +61,22 @@ def run_job(
         **model_config["diffusion"], device=device
     )
     LOGGER.info(display_current_time())
-    net = setup_model(inference_config["use_model"], model_config, device)
+
+    location_path=os.path.abspath(inference_config["known_location_path"])
+    loc = torch.from_numpy(np.load(location_path)).to(dtype=torch.float32)
+    use_mrts=model_config['MRTS'].get("use_mrts", False)
+    mrts_dim = model_config['MRTS'].get("mrts_dim", -1)
+    N = torch.tensor(loc.shape[0], dtype=torch.float32, device=device)
+    klim = torch.minimum(N, torch.round(10 * torch.sqrt(N))).to(torch.int64)
+    if use_mrts:
+        assert mrts_dim == -1 or mrts_dim > 0, "MRTS dimension must be -1 (for default) or a positive integer."
+        if mrts_dim == -1:
+            pass  # klim is already set to the default value based on N
+        else:
+            klim = torch.tensor(mrts_dim, dtype=torch.float32, device=device)
+        LOGGER.info(f"Using MRTS with {klim} dimensions for spatial training.")
+
+    net = setup_model(inference_config["use_model"], model_config, use_mrts=use_mrts, mrts_dim=klim, device=device)
 
     # Check if multiple GPUs are available
     if torch.cuda.device_count() > 0:
@@ -94,6 +106,8 @@ def run_job(
             missing_k=inference_config["missing_k"],
             only_generate_missing=inference_config["only_generate_missing"],
             saved_data_names=saved_data_names,
+            use_mrts=use_mrts,  # New
+            mrts_dim=klim,  # New
             enable_spatial_prediction=inference_config.get("enable_spatial_inference", True),  # New
             enable_spatial_normalization=inference_config.get("enable_spatial_normalization", True),  # New
             known_location_path=os.path.abspath(inference_config["known_location_path"]),  # New
@@ -105,6 +119,24 @@ def run_job(
         LOGGER.info(f"Inference complete")
         LOGGER.info(display_current_time())
 
+def set_seed(seed: int = 42):
+    import random
+    import numpy as np
+    import torch
+
+    # Python random
+    random.seed(seed)
+
+    # NumPy
+    np.random.seed(seed)
+
+    # PyTorch (CPU)
+    torch.manual_seed(seed)
+
+    # PyTorch (GPU)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 if __name__ == "__main__":
     args = fetch_args()
@@ -119,5 +151,10 @@ if __name__ == "__main__":
     if torch.cuda.device_count() > 0:
         LOGGER.info(f"Using {torch.cuda.device_count()} GPUs!")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    seed = model_config.get("seed", -1)  # -1 for random seed
+    if seed != -1:
+        set_seed(seed)
+        LOGGER.info(f"Random seed set to {seed} for reproducibility.")
 
     run_job(model_config, inference_config, device, args.ckpt_iter)

@@ -32,3 +32,9 @@ chmod +x envs/conda/build_conda_env.sh
 ```
 
 修改的檔案均在script與sssd中，請參考sssd\training\utils.py
+
+## Usage
+```bash
+./scripts/autorun/run_job.sh -c configs/configs-MERRA2-1var-S4+AFRK -t 30
+```
+`-c` for config paths, `-t` for experiment times
