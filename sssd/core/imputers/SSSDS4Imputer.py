@@ -220,7 +220,6 @@ class SSSDS4Imputer(nn.Module):
         s4_dropout,
         s4_bidirectional,
         s4_use_layer_norm,
-        #frk_channels=1,
         use_mrts=True,
         mrts_dim=None,
         device="cuda",
@@ -267,24 +266,8 @@ class SSSDS4Imputer(nn.Module):
             ZeroConv1d(skip_channels, output_channels),
         )
 
-
-        if use_mrts and mrts_dim is not None:
-            self.mrts_proj = nn.Linear(mrts_dim, mrts_dim)
-        # mrts_dim = int(mrts_dim)
-        # self.mrts_proj = nn.Sequential(
-        #     # (N, mrts_dim) → (N, 1, mrts_dim)
-        #     nn.Unflatten(dim=1, unflattened_size=(1, mrts_dim)),
-
-        #     # Conv path: (N, 1, mrts_dim) → (N, hidden_dim, mrts_dim) [kernel=1]
-        #     nn.Conv1d(1, mrts_dim // 2, kernel_size=1),
-        #     nn.ReLU(),
-
-        #     # (N, hidden_dim, mrts_dim) → (N, 1, mrts_dim)
-        #     nn.Conv1d(mrts_dim // 2, 1, kernel_size=1),
-
-        #     # 回到你原本 Linear 的輸出格式
-        #     nn.Flatten(start_dim=1, end_dim=2)  # (N, 1, mrts_dim) → (N, mrts_dim)
-        # )
+        # if use_mrts and mrts_dim is not None:
+        #     self.mrts_proj = nn.Linear(mrts_dim, mrts_dim)
         
     def forward(self, input_data):
         #noise, conditional, mask, diffusion_steps, frk_pred = input_data
@@ -294,7 +277,7 @@ class SSSDS4Imputer(nn.Module):
         conditional = conditional * mask
         #conditional = torch.cat([conditional, mask.float(), frk_pred * mask], dim=1)
         if self.use_mrts and mrts is not None:
-            mrts_seq = self.mrts_proj(mrts).unsqueeze(-1).repeat(1, 1, conditional.shape[2])
+            mrts_seq = mrts.unsqueeze(-1).repeat(1, 1, conditional.shape[2])
             #print(f"conditional shape: {conditional.shape}, mrts_seq shape: {mrts_seq.shape}")
             conditional = torch.cat([conditional, mask.float(), mrts_seq], dim=1)
         elif self.use_mrts:
