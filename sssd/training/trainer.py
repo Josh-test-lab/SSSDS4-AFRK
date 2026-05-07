@@ -14,9 +14,9 @@ from sssd.core.model_specs import MASK_FN
 from sssd.training.utils import training_loss
 from sssd.utils.logger import setup_logger
 from sssd.utils.utils import find_max_epoch
-from sssd.data.utils import get_dataloader  # New
+from sssd.data.utils import get_dataloader, get_MRTS_dataloader  # New
 from sssd.utils.utils import find_max_epoch, std_normal  # New
-from autoFRK import AutoFRK, to_tensor, garbage_cleaner  # New
+from autoFRK import AutoFRK, MRTS, to_tensor, garbage_cleaner  # New
 from autoFRK.utils.helper import cbrt  # New
 
 LOGGER = setup_logger()
@@ -60,24 +60,20 @@ class DiffusionTrainer:
         masking: str,
         missing_k: int,
         batch_size: int,
-        enable_spatial_training: bool,  # New
+        use_mrts: bool,  # New
+        mrts_dim: torch.Tensor,  # New
         location_path: str,  # New
-        AFRK_method: str,  # New
-        AFRK_tps_method: str,  # New
         logger: Optional[logging.Logger] = None,
     ) -> None:
         self.device = device
-        loader, ts_mean, ts_std, idx_order = get_dataloader(  # New
+        loader, _, _, idx_order = get_dataloader(  # New
             path=data_path,
             batch_size=batch_size,
             is_shuffle=True,
             index_order=None,
             device=device,
         )
-        #print(f"data index order: {idx_order}")  # New
         self.dataloader = loader
-        #self.ts_mean = ts_mean  # New
-        #self.ts_std = ts_std    # New
         self.real_data = self.dataloader.dataset.tensors[0].to(self.device) # * self.ts_std + self.ts_mean # New
         loc_loader, _, _, _ = get_dataloader(  # New
             path=location_path,
@@ -88,7 +84,27 @@ class DiffusionTrainer:
             device=device,
         )
         self.loc_loader = loc_loader  # New
-        self.enable_spatial_training = enable_spatial_training  # New
+        loc = torch.from_numpy(np.load(location_path)).to(dtype=torch.float32)
+        if use_mrts:
+            mrts_model = MRTS(dtype=torch.float32, logger_level=30, device=device)
+            res = mrts_model.forward(
+                knot=loc,
+                k=mrts_dim,
+            )
+            mrts = res['MRTS']
+            del loc, mrts_model, res
+        else:
+            mrts = torch.zeros((loc.shape[0], mrts_dim), dtype=torch.float32, device=device)
+            del loc
+        mrts_loader, _, _, _ = get_MRTS_dataloader(  # New
+            mrts=mrts,
+            batch_size=batch_size,
+            is_shuffle=True,
+            index_order=idx_order,
+            normalize=False,
+            device=device,
+        )
+        self.mrts_loader = mrts_loader  # New
         self.diffusion_hyperparams = diffusion_hyperparams
         self.net = nn.DataParallel(net).to(device)
         self.output_directory = output_directory
@@ -100,8 +116,6 @@ class DiffusionTrainer:
         self.only_generate_missing = only_generate_missing
         self.masking = masking
         self.missing_k = missing_k
-        self.AFRK_method = AFRK_method  # New
-        self.AFRK_tps_method = AFRK_tps_method # New
         self.writer = SummaryWriter(f"{output_directory}/log")
         self.batch_size = batch_size
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=self.learning_rate)
@@ -156,9 +170,21 @@ class DiffusionTrainer:
     def _train_per_epoch(self) -> torch.Tensor:
         loss_function=nn.MSELoss()
         # New
-        for batch_idx, ((batch,), (loc_batch,)) in enumerate(tqdm(zip(self.dataloader, self.loc_loader), total=min(len(self.dataloader), len(self.loc_loader)), desc=f"{self.n_iter}-th training TS")):
+        for batch_idx, ((batch,), (loc_batch,), (mrts_batch,)) in enumerate(tqdm(
+            zip(
+                self.dataloader, 
+                self.loc_loader, 
+                self.mrts_loader
+                ), 
+            total=min(
+                len(self.dataloader), 
+                len(self.loc_loader), 
+                len(self.mrts_loader)
+                ), 
+            desc=f"{self.n_iter}-th training TS")):
             batch = batch.to(self.device)
             loc_batch = loc_batch.to(self.device)
+            mrts_batch = mrts_batch.to(self.device)
 
             mask = self._update_mask(batch)
             loss_mask = ~mask.bool()
@@ -171,29 +197,16 @@ class DiffusionTrainer:
             assert batch.size() == mask.size() == loss_mask.size()
             
             self.optimizer.zero_grad()
-            # loss, choosen_k = training_loss(
             loss = training_loss(
                 model=self.net,
                 loss_function=loss_function,
-                training_data=(batch, batch, mask, loss_mask),
+                training_data=(batch, batch, mask, loss_mask, mrts_batch),
                 diffusion_parameters=self.diffusion_hyperparams,
                 generate_only_missing=self.only_generate_missing,
-                enable_frk= self.enable_spatial_training,
-                loc=loc_batch,
-                AFRK_method=self.AFRK_method,
-                AFRK_tps_method=self.AFRK_tps_method,
                 device=self.device,
             )
             loss.backward()
             self.optimizer.step()
-
-            # self.logger.info(f"Iteration:{self.n_iter} choosen_k: {choosen_k}")
-            # for k_idx, k_value in enumerate(choosen_k):
-            #     self.writer.add_scalar(
-            #         tag=f"Train/choosen_k/{k_idx}",
-            #         scalar_value=k_value,
-            #         global_step=self.n_iter
-            #     )
 
         return loss
 

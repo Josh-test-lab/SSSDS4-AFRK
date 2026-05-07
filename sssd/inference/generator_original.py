@@ -10,10 +10,10 @@ from tqdm import tqdm  # New
 import csv  # New
 
 from sssd.core.model_specs import MASK_FN
-from sssd.data.utils import get_dataloader, get_MRTS_dataloader  # New
+from sssd.data.utils import get_dataloader  # New
 from sssd.utils.logger import setup_logger
 from sssd.utils.utils import find_max_epoch, sampling
-from autoFRK import AutoFRK, MRTS, to_tensor, garbage_cleaner  # New
+from autoFRK import AutoFRK, to_tensor, garbage_cleaner  # New
 
 LOGGER = setup_logger()
 
@@ -55,8 +55,6 @@ class DiffusionGenerator:
         masking: str,
         missing_k: int,
         only_generate_missing: int,
-        use_mrts: bool,  # New
-        mrts_dim: torch.Tensor,  # New
         enable_spatial_prediction: bool,  # New
         enable_spatial_normalization: bool,  # New
         known_location_path: str,  # New
@@ -89,34 +87,6 @@ class DiffusionGenerator:
         self.enable_spatial_prediction = enable_spatial_prediction  # New
         self.enable_spatial_normalization = enable_spatial_normalization  # New
         self.known_location_path = known_location_path  # New
-        self.known_loc_loader, _, _, _ = get_dataloader(  # New
-            path=known_location_path,
-            batch_size=batch_size,
-            is_shuffle=False,
-            index_order=idx_order,
-            normalize=False,
-            device=device,
-        )
-        loc = torch.from_numpy(np.load(known_location_path)).to(dtype=torch.float32)
-        if use_mrts:
-            mrts_model = MRTS(dtype=torch.float32, logger_level=30, device=device)
-            res = mrts_model.forward(
-                knot=loc,
-                k=mrts_dim
-            )
-            mrts = res['MRTS']
-        else:
-            mrts = torch.zeros((loc.shape[0], mrts_dim), dtype=torch.float32, device=device)
-        del loc, mrts_model, res
-        mrts_loader, _, _, _ = get_MRTS_dataloader(  # New
-            mrts=mrts,
-            batch_size=batch_size,
-            is_shuffle=True,
-            index_order=idx_order,
-            normalize=False,
-            device=device,
-        )
-        self.mrts_loader = mrts_loader  # New
         self.unknown_location_path = unknown_location_path  # New
         self.missing_k = missing_k  # New
         self.AFRK_method = AFRK_method  # New
@@ -211,7 +181,7 @@ class DiffusionGenerator:
             device=device,
         )
 
-        unobs_mrts = None
+        mrts = None
         choosen_k = []
         for variable in tqdm(range(V), desc=f"inferencing autoFRK"):
             data_slice = sssd_inference[:, :, variable]
@@ -219,7 +189,7 @@ class DiffusionGenerator:
                 _ = frk.forward(
                     data=data_slice,
                     loc=known_loc,
-                    G = unobs_mrts,
+                    G = mrts,
                     method=self.AFRK_method,
                     tps_method=self.AFRK_tps_method,
                     requires_grad=False
@@ -227,7 +197,7 @@ class DiffusionGenerator:
                 pred = frk.predict(
                     newloc = unknown_loc
                 )['pred.value']
-                unobs_mrts = frk.obj['G'] if unobs_mrts is None else unobs_mrts
+                mrts = frk.obj['G'] if mrts is None else mrts
                 choosen_k.append(frk.obj['G']['MRTS'].shape[1])
 
             except torch._C._LinAlgError:
@@ -244,42 +214,10 @@ class DiffusionGenerator:
     def generate(self) -> list:
         """Generate samples using the given neural network model."""
         all_generated = []
-        #for index, (batch,) in tqdm(enumerate(self.dataloader), total=len(self.dataloader), desc="inferencing sssd"):
-        for index, ((batch,), (known_loc_batch,), (mrts_batch,)) in enumerate(tqdm(zip(self.dataloader, self.known_loc_loader, self.mrts_loader), total=min(len(self.dataloader), len(self.known_loc_loader), len(self.mrts_loader)), desc=f"inferencing sssd")):
+        for index, (batch,) in tqdm(enumerate(self.dataloader), total=len(self.dataloader), desc="inferencing sssd"):
             batch = batch.to(self.device)
             mask = self._update_mask(batch)
             batch = batch.permute(0, 2, 1)
-            known_loc_batch = known_loc_batch.to(self.device)
-            mrts_batch = mrts_batch.to(self.device)
-
-            # New: Integrate AutoFRK for spatial prediction
-            # frk_pred = None
-            # if self.enable_spatial_prediction and known_loc_batch is not None:
-            #     temp = batch.permute(1, 0, 2)
-            #     frk_pred = torch.zeros_like(batch)
-            #     for i in range(temp.shape[0]):
-            #         success = False
-            #         while not success:
-            #             try:
-            #                 df = temp[i]
-            #                 frk_model = AutoFRK(
-            #                     device=df.device,
-            #                     dtype=df.dtype,
-            #                     logger_level=30
-            #                     )
-            #                 frk_model.forward(
-            #                     data=df,
-            #                     loc=known_loc_batch,
-            #                     method=self.AFRK_method,
-            #                     tps_method=self.AFRK_tps_method,
-            #                     requires_grad=True
-            #                     )
-            #                 pred_res = frk_model.predict(newloc=known_loc_batch)
-            #                 frk_pred[:, i, :] = pred_res['pred.value']
-            #                 mrts = frk_model.obj['G']['MRTS']
-            #                 success = True  # successful and exit loop
-            #             except Exception as e:
-            #                 LOGGER.warning(f"Failed to process record {i}. Retrying. Error: {e}")
 
             generated_series = (
                 sampling(
@@ -288,7 +226,6 @@ class DiffusionGenerator:
                     diffusion_hyperparams=self.diffusion_hyperparams,
                     cond=batch,
                     mask=mask,
-                    mrts=mrts_batch,
                     only_generate_missing=self.only_generate_missing,
                     device=self.device,
                 )

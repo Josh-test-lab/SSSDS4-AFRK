@@ -173,3 +173,67 @@ def get_dataloader(
     print(f"DataLoader created with batch size {batch_size}, and shuffle={is_shuffle}, num_workers={num_workers}, pin_memory={pin_memory}, device={device}, loader length={len(loader)}")
 
     return loader, ts_mean.to(torch.float32).to(device), ts_std.to(torch.float32).to(device), idx_order
+
+
+def get_MRTS_dataloader(
+    mrts: torch.Tensor,
+    batch_size: int,
+    is_shuffle: bool = True,
+    index_order: np.ndarray = None,  # New
+    device: Union[str, torch.device] = "cpu",
+    num_workers: int = 0,
+    normalize: bool = True,  # New
+) -> DataLoader:
+    """
+    Get a PyTorch DataLoader for the dataset stored at the given path.
+
+    Args:
+        mrts (torch.Tensor): The MRTS data.
+        batch_size (int): Size of each batch.
+        is_shuffle (bool, optional): Whether to shuffle the dataset. Defaults to True.
+        device (Union[str, torch.device], optional): Device to move the data to. Defaults to "cpu".
+        num_workers (int, optional): Number of subprocesses to use for data loading. Defaults to 8.
+
+    Returns:
+        DataLoader: PyTorch DataLoader for the dataset.
+    """
+    data = mrts
+
+    idx_order = None
+    if is_shuffle and index_order is None:
+        idx_order = torch.randperm(data.shape[0], device=data.device)
+        data = data[idx_order]
+    elif is_shuffle and index_order is not None:
+        idx_order = torch.as_tensor(index_order, dtype=torch.long, device=data.device)
+        if idx_order.numel() != data.shape[0]:
+            raise ValueError(f"index_order size mismatch: got {idx_order.numel()}, expected {data.shape[0]}")
+        if not torch.equal(torch.sort(idx_order).values, torch.arange(data.shape[0], device=data.device)):
+            raise ValueError(f"index_order is not a valid permutation of 0..{data.shape[0]-1}")
+        data = data[idx_order]
+    else:
+        idx_order = torch.arange(data.shape[0], device=data.device)
+
+    if normalize:
+        ts_mean = data.mean(dim=1, keepdim=True)
+        ts_std = data.std(dim=1, unbiased=False, keepdim=True)
+        print(f"Data mean shape: {ts_mean.shape}, std shape: {ts_std.shape}")
+        if (ts_std == 0).any():
+            LOGGER.error("Standard deviation is zero for one or more sequences; normalization may produce NaN or inf.")
+            #ts_std[ts_std == 0] = 1.0
+        data = (data - ts_mean) / ts_std
+    else:
+        ts_mean = torch.zeros_like(data)
+        ts_std = torch.ones_like(data)
+    
+    dataset = TensorDataset(data)
+    pin_memory = False
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        pin_memory=pin_memory,
+        num_workers=num_workers,
+    )
+    print(f"DataLoader created with batch size {batch_size}, and shuffle={is_shuffle}, num_workers={num_workers}, pin_memory={pin_memory}, device={device}, loader length={len(loader)}")
+
+    return loader, ts_mean.to(torch.float32).to(device), ts_std.to(torch.float32).to(device), idx_order

@@ -5,8 +5,7 @@ import torch
 from sssd.utils.utils import std_normal
 from sssd.utils.logger import setup_logger  # New
 LOGGER = setup_logger()  # New
-import numpy as np  # New
-from autoFRK import AutoFRK, MRTS  # New
+from autoFRK import AutoFRK  # New
 
 def training_loss(
     model: torch.nn.Module,
@@ -14,6 +13,10 @@ def training_loss(
     training_data: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
     diffusion_parameters: Dict[str, torch.Tensor],
     generate_only_missing: int = 1,
+    enable_frk: bool = True,
+    loc: torch.Tensor = None,
+    AFRK_method: str = "fast",
+    AFRK_tps_method: str = "rectangular",
     device: str = "cpu",
 ) -> torch.Tensor:
     """
@@ -36,7 +39,7 @@ def training_loss(
     T, alpha_bar = diffusion_parameters["T"], diffusion_parameters["Alpha_bar"]
 
     # Unpack training data
-    time_series, condition, mask, loss_mask, mrts = training_data
+    time_series, condition, mask, loss_mask = training_data
 
     batch_size = time_series.shape[0]
 
@@ -71,43 +74,9 @@ def training_loss(
         LOGGER.warning("transformed_series contains NaN")
         LOGGER.info(f"transformed_series stats: min={transformed_series.min().item()}, max={transformed_series.max().item()}, mean={transformed_series.mean().item()}")
 
-    # New: Integrate AutoFRK for spatial prediction
-    # frk_pred = None
-    # enable_frk = True
-    # if enable_frk and loc is not None:
-    #     temp = time_series.permute(1, 0, 2)
-    #     frk_pred = torch.zeros_like(time_series)
-    #     for i in range(temp.shape[0]):
-    #         success = False
-    #         while not success:
-    #             try:
-    #                 df = temp[i]
-    #                 frk_model = AutoFRK(
-    #                     device=df.device,
-    #                     dtype=df.dtype,
-    #                     logger_level=30
-    #                     )
-    #                 frk_model.forward(
-    #                     data=df,
-    #                     loc=loc,
-    #                     method=AFRK_method,
-    #                     tps_method=AFRK_tps_method,
-    #                     requires_grad=True
-    #                     )
-    #                 pred_res = frk_model.predict(newloc=loc)
-    #                 frk_pred[:, i, :] = pred_res['pred.value']
-    #                 success = True  # successful and exit loop
-    #                 mrts = frk_model.obj['G']['MRTS']
-    #                 #print(mrts)
-    #             except Exception as e:
-    #                 LOGGER.warning(f"Failed to process record {i}. Retrying. Error: {e}")
-
-    #print(f"FRK Predictions: {frk_pred.shape}")
-    #print(f"enable frk: {enable_frk}, loc is None: {loc is None}")
     # Predict epsilon according to epsilon_theta
     epsilon_theta = model(
-        #(transformed_series, condition, mask, diffusion_steps.view(batch_size, 1), frk_pred)
-        (transformed_series, condition, mask, diffusion_steps.view(batch_size, 1), mrts)
+        (transformed_series, condition, mask, diffusion_steps.view(batch_size, 1))
     )
 
     # debug
@@ -115,11 +84,50 @@ def training_loss(
         LOGGER.warning("epsilon_theta contains NaN")
         LOGGER.info(f"epsilon_theta stats: min={epsilon_theta.min().item()}, max={epsilon_theta.max().item()}, mean={epsilon_theta.mean().item()}")
 
+    # New: Integrate AutoFRK for spatial prediction
+    # choosen_k = []
+    if enable_frk and loc is not None:
+        temp = epsilon_theta.permute(1, 0, 2)
+        #print(f"temp shape: {temp.shape}")
+        epsilon_theta_fused = torch.zeros_like(epsilon_theta)
+        #print(f"epsilon_theta_fused shape: {epsilon_theta_fused.shape}")
+        for i in range(temp.shape[0]):
+            success = False
+            while not success:
+                try:
+                    df = temp[i] + 1e-8 * torch.randn_like(temp[i])
+                    #print(f"df shape: {df.shape}")
+                    #print(f"loc shape: {loc.shape}")
+                    frk_model = AutoFRK(
+                        device=df.device,
+                        dtype=df.dtype,
+                        logger_level=30
+                        )
+                    frk_model.forward(
+                        data=df,
+                        loc=loc,
+                        method=AFRK_method,
+                        tps_method=AFRK_tps_method,
+                        requires_grad=True
+                        )
+                    pred_res = frk_model.predict(newloc=loc)
+                    frk_pred = pred_res['pred.value']
+                    epsilon_theta_fused[:, i, :] = frk_pred
+                    success = True  # successful and exit loop
+                except Exception as e:
+                    LOGGER.warning(f"Failed to process record {i}. Retrying. Error: {e}")
+                # choosen_k.append(frk_model.obj['G']['MRTS'].shape[1])
+    elif enable_frk and loc is None:
+        raise ValueError("Location data must be provided when enable_frk is True.")
+    else:
+        epsilon_theta_fused = epsilon_theta
+
     # Compute loss
     if generate_only_missing:
-        loss = loss_function(epsilon_theta[loss_mask], noise[loss_mask])
+        loss = loss_function(epsilon_theta_fused[loss_mask], noise[loss_mask])
     else:
-        loss = loss_function(epsilon_theta, noise)
+        loss = loss_function(epsilon_theta_fused, noise)
+        # choosen_k = [0]
 
     # debug
     if torch.isnan(loss):

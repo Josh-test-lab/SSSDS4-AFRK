@@ -118,7 +118,6 @@ def sampling(
     diffusion_hyperparams: Dict[str, torch.Tensor],
     cond: torch.Tensor,
     mask: torch.Tensor,
-    mrts: torch.Tensor,
     only_generate_missing: int = 0,
     device: Union[torch.device, str] = "cpu",
 ) -> torch.Tensor:
@@ -155,7 +154,7 @@ def sampling(
                 device
             )  # use the corresponding reverse step
             epsilon_theta = net(
-                (x, cond, mask, diffusion_steps, mrts)
+                (x, cond, mask, diffusion_steps)
             )  # predict \epsilon according to \epsilon_\theta
             # update x_{t-1} to \mu_\theta(x_t)
             x = (
