@@ -1,7 +1,7 @@
 # Inference configuration
 batch_size: 40  # Batch size for inference
-output_directory: "./results/2a7-1000loc-1var-S4+AFRK/inference"  # Output directory for inference results
-ckpt_path: "./results/2a7-1000loc-1var-S4+AFRK"  # Path to checkpoint for inference
+output_directory: "./results/2a7-1000loc-1var-S4+MRTS/inference"  # Output directory for inference results
+ckpt_path: "./results/2a7-1000loc-1var-S4+MRTS"  # Path to checkpoint for inference
 trials: 1 # Replications
 
 # Additional training settings
