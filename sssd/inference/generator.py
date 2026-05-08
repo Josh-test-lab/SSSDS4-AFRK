@@ -105,9 +105,10 @@ class DiffusionGenerator:
                 k=mrts_dim
             )
             mrts = res['MRTS']
+            del mrts_model, res
         else:
             mrts = torch.zeros((loc.shape[0], mrts_dim), dtype=torch.float32, device=device)
-        del loc, mrts_model, res
+        del loc
         mrts_loader, _, _, _ = get_MRTS_dataloader(  # New
             mrts=mrts,
             batch_size=batch_size,
