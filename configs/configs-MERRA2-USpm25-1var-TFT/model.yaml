@@ -1,0 +1,15 @@
+input_chunk_length: 80
+hidden_size: 32
+lstm_layers: 1
+dropout: 0.1
+batch_size: 40
+n_epochs: 500
+lr: 0.001
+add_relative_index: True
+random_state: "None"
+ic: 'aic'
+hours_a_day: 1
+
+output_name: "MERRA2-USpm25-1var-TFT"
+output_directory: "./results"
+dataset_directory: "./datasets/MERRA2-USpm25-1var"

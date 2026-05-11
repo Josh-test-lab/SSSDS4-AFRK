@@ -1,0 +1,3 @@
+output_name: "MERRA2-USpm25-1var-GP"
+output_directory: "./results"
+dataset_directory: "./datasets/MERRA2-USpm25-1var"
